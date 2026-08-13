@@ -1,20 +1,18 @@
 # Encurtaí
 
-Encurtador de links **100% local e grátis**.
+Encurtador de links local, gratuito, com interface limpa.
 
 | Parte | Pasta | Porta | Função |
 |---|---|---|---|
-| React | `frontend` | 5173 | Tela |
-| Node.js | `api` | 3001 | Cria link, redireciona, registra clique |
-| Python | `stats` | 8001 | Estatísticas (totais, ranking, cliques por dia) |
+| React | `frontend` | 5173 | Interface |
+| Node.js | `api` | 3001 | Criar, redirecionar, apagar, registrar clique |
+| Python | `stats` | 8001 | Estatísticas |
 
-Sem Firebase, sem OpenAI, sem cartão. Os dados ficam em `api/data/db.json`.
+Dados em `api/data/db.json`. Sem serviços pagos.
 
 ## Como rodar
 
-Abra **3 terminais**.
-
-### 1) API Node.js
+Três terminais:
 
 ```bash
 cd encurtador-link/api
@@ -22,17 +20,13 @@ npm install
 npm run dev
 ```
 
-### 2) Estatísticas Python
-
 ```bash
 cd encurtador-link/stats
-python -m venv .venv
-.venv\Scripts\activate
+py -3.12 -m venv .venv
+.\.venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --port 8001 --reload
 ```
-
-### 3) Frontend React
 
 ```bash
 cd encurtador-link/frontend
@@ -42,14 +36,11 @@ npm run dev
 
 Abra http://localhost:5173
 
-1. Cole uma URL (`https://...`)
-2. Clique em **Encurtar**
-3. Abra o link curto (`/r/xxxxxx`) — isso conta 1 clique
-4. Volte na tela e veja o gráfico (Python)
-
 ## API
 
 - `POST /api/links` `{ "url": "https://exemplo.com" }`
 - `GET /api/links`
-- `GET /api/stats` (Node.js chama o Python)
-- `GET /r/:code` redireciona e grava o clique
+- `DELETE /api/links/:code`
+- `GET /api/stats`
+- `GET /api/health`
+- `GET /r/:code` redireciona e conta o clique

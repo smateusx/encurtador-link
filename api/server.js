@@ -2,13 +2,15 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const { readDb, writeDb } = require("./db");
+const { computeStats } = require("./stats");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const PYTHON_URL = process.env.PYTHON_URL || "http://127.0.0.1:8001";
+const MAX_URL_LENGTH = 2048;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "16kb" }));
 
 function makeCode(size = 7) {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -20,17 +22,65 @@ function makeCode(size = 7) {
   return code;
 }
 
+function normalizeUrl(value) {
+  let raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) {
+    raw = `https://${raw}`;
+  }
+  return raw;
+}
+
 function isValidUrl(value) {
   try {
     const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    if (!u.hostname) return false;
+    const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+    if (local && u.pathname.startsWith("/r/")) return false;
+    return u.hostname.includes(".") || local;
   } catch {
     return false;
   }
 }
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+function publicBase(req) {
+  const forwarded = req.get("x-forwarded-proto");
+  const proto = forwarded || req.protocol;
+  return `${proto}://${req.get("host")}`;
+}
+
+function notFoundPage() {
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Link não encontrado</title>
+  <style>
+    body { font-family: Georgia, serif; max-width: 40rem; margin: 12vh auto; padding: 0 1.5rem; color: #1a1a1a; }
+    a { color: #1a1a1a; }
+  </style>
+</head>
+<body>
+  <h1>Este link não existe</h1>
+  <p>O código pode estar errado ou o link foi apagado.</p>
+  <p><a href="/">Voltar ao início</a></p>
+</body>
+</html>`;
+}
+
+app.get("/api/health", async (_req, res) => {
+  let python = false;
+  try {
+    const response = await fetch(`${PYTHON_URL}/health`, {
+      signal: AbortSignal.timeout ? AbortSignal.timeout(800) : undefined,
+    });
+    python = response.ok;
+  } catch {
+    python = false;
+  }
+  res.json({ ok: true, python });
 });
 
 app.get("/api/links", (_req, res) => {
@@ -39,24 +89,34 @@ app.get("/api/links", (_req, res) => {
     .map((link) => ({
       ...link,
       clicks: db.clicks.filter((c) => c.code === link.code).length,
+      shortUrl: `/r/${link.code}`,
     }))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   res.json(links);
 });
 
 app.post("/api/links", (req, res) => {
-  const url = String(req.body?.url || "").trim();
+  const url = normalizeUrl(req.body?.url);
+  if (!url) {
+    return res.status(400).json({ error: "Cole um endereço para encurtar." });
+  }
+  if (url.length > MAX_URL_LENGTH) {
+    return res.status(400).json({ error: "Este endereço é longo demais." });
+  }
   if (!isValidUrl(url)) {
-    return res.status(400).json({ error: "URL inválida. Use http:// ou https://" });
+    return res.status(400).json({
+      error: "URL inválida. Use um endereço completo, como exemplo.com ou https://exemplo.com",
+    });
   }
 
   const db = readDb();
   const existing = db.links.find((l) => l.url === url);
   if (existing) {
-    return res.status(201).json({
+    return res.status(200).json({
       ...existing,
+      reused: true,
       clicks: db.clicks.filter((c) => c.code === existing.code).length,
-      shortUrl: `${req.protocol}://${req.get("host")}/r/${existing.code}`,
+      shortUrl: `${publicBase(req)}/r/${existing.code}`,
     });
   }
 
@@ -75,36 +135,48 @@ app.post("/api/links", (req, res) => {
 
   res.status(201).json({
     ...link,
+    reused: false,
     clicks: 0,
-    shortUrl: `${req.protocol}://${req.get("host")}/r/${code}`,
+    shortUrl: `${publicBase(req)}/r/${code}`,
   });
 });
 
+app.delete("/api/links/:code", (req, res) => {
+  const code = String(req.params.code || "").replace(/[^a-zA-Z0-9]/g, "");
+  const db = readDb();
+  const index = db.links.findIndex((l) => l.code === code);
+  if (index === -1) {
+    return res.status(404).json({ error: "Link não encontrado. Ele pode já ter sido apagado." });
+  }
+
+  const [removed] = db.links.splice(index, 1);
+  db.clicks = db.clicks.filter((c) => c.code !== code);
+  writeDb(db);
+  res.json({ message: "deleted", code: removed.code });
+});
+
 app.get("/api/stats", async (_req, res) => {
+  const fallback = { ...computeStats(readDb()), source: "node" };
   try {
-    const response = await fetch(`${PYTHON_URL}/stats`);
+    const response = await fetch(`${PYTHON_URL}/stats`, {
+      signal: AbortSignal.timeout ? AbortSignal.timeout(1500) : undefined,
+    });
     if (!response.ok) {
-      throw new Error("python_error");
+      return res.json(fallback);
     }
     const data = await response.json();
-    res.json(data);
+    res.json({ ...fallback, ...data, source: data.source || "python" });
   } catch {
-    const db = readDb();
-    res.json({
-      totalLinks: db.links.length,
-      totalClicks: db.clicks.length,
-      byDay: [],
-      top: [],
-      source: "node-fallback",
-    });
+    res.json(fallback);
   }
 });
 
 app.get("/r/:code", (req, res) => {
+  const code = String(req.params.code || "").replace(/[^a-zA-Z0-9]/g, "");
   const db = readDb();
-  const link = db.links.find((l) => l.code === req.params.code);
+  const link = db.links.find((l) => l.code === code);
   if (!link) {
-    return res.status(404).send("Link não encontrado");
+    return res.status(404).type("html").send(notFoundPage());
   }
 
   db.clicks.push({
@@ -112,7 +184,7 @@ app.get("/r/:code", (req, res) => {
     at: new Date().toISOString(),
   });
   writeDb(db);
-  res.redirect(link.url);
+  res.redirect(302, link.url);
 });
 
 app.listen(PORT, () => {
