@@ -2,6 +2,12 @@
 
 Encurtador de links gratuito, com interface limpa.
 
+## Sobre o projeto
+
+**Parte teórica.** O Encurtaí aplica o conceito de encurtamento de URL: um código curto aponta para um endereço longo e o servidor redireciona quem abre o atalho (HTTP 302), registrando o clique. A API segue o modelo REST (criar, listar, apagar e consultar). O sistema é separado em camadas — interface, regras de negócio e estatísticas — e usa validação de entrada para reduzir erro do usuário, no espírito das heurísticas de Nielsen (feedback, prevenção de erro, controle e consistência).
+
+**Parte prática.** Foi construído um app funcional com React (Vite) na interface, Node.js/Express na API e Python/FastAPI nas estatísticas em ambiente local. Dá para criar, copiar e apagar links, ver cliques por dia e redirecionar `/r/:código`. Os dados locais ficam em JSON. O código está no GitHub e a versão online na Vercel: https://encurtador-link-two.vercel.app/
+
 | Parte | Pasta | Porta | Função |
 |---|---|---|---|
 | React | `frontend` | 5173 | Interface |
