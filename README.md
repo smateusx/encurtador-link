@@ -1,16 +1,16 @@
 # Encurtaí
 
-Encurtador de links local, gratuito, com interface limpa.
+Encurtador de links gratuito, com interface limpa.
 
 | Parte | Pasta | Porta | Função |
 |---|---|---|---|
 | React | `frontend` | 5173 | Interface |
 | Node.js | `api` | 3001 | Criar, redirecionar, apagar, registrar clique |
-| Python | `stats` | 8001 | Estatísticas |
+| Python | `stats` | 8001 | Estatísticas (local) |
 
-Dados em `api/data/db.json`. Sem serviços pagos.
+No computador, os dados ficam em `api/data/db.json`. Na Vercel, a API Node.js responde em `/api` e `/r`.
 
-## Como rodar
+## Como rodar local
 
 Três terminais:
 

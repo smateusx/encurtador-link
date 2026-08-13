@@ -5,12 +5,18 @@ const { readDb, writeDb } = require("./db");
 const { computeStats } = require("./stats");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 const PYTHON_URL = process.env.PYTHON_URL || "http://127.0.0.1:8001";
 const MAX_URL_LENGTH = 2048;
+const onVercel = Boolean(process.env.VERCEL);
 
 app.use(cors());
 app.use(express.json({ limit: "16kb" }));
+
+function wrap(handler) {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch(next);
+  };
+}
 
 function makeCode(size = 7) {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -46,7 +52,7 @@ function isValidUrl(value) {
 
 function publicBase(req) {
   const forwarded = req.get("x-forwarded-proto");
-  const proto = forwarded || req.protocol;
+  const proto = forwarded || req.protocol || "https";
   return `${proto}://${req.get("host")}`;
 }
 
@@ -70,21 +76,8 @@ function notFoundPage() {
 </html>`;
 }
 
-app.get("/api/health", async (_req, res) => {
-  let python = false;
-  try {
-    const response = await fetch(`${PYTHON_URL}/health`, {
-      signal: AbortSignal.timeout ? AbortSignal.timeout(800) : undefined,
-    });
-    python = response.ok;
-  } catch {
-    python = false;
-  }
-  res.json({ ok: true, python });
-});
-
-app.get("/api/links", (_req, res) => {
-  const db = readDb();
+async function listLinks(_req, res) {
+  const db = await readDb();
   const links = db.links
     .map((link) => ({
       ...link,
@@ -93,9 +86,9 @@ app.get("/api/links", (_req, res) => {
     }))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   res.json(links);
-});
+}
 
-app.post("/api/links", (req, res) => {
+async function createLink(req, res) {
   const url = normalizeUrl(req.body?.url);
   if (!url) {
     return res.status(400).json({ error: "Cole um endereço para encurtar." });
@@ -109,7 +102,7 @@ app.post("/api/links", (req, res) => {
     });
   }
 
-  const db = readDb();
+  const db = await readDb();
   const existing = db.links.find((l) => l.url === url);
   if (existing) {
     return res.status(200).json({
@@ -131,7 +124,7 @@ app.post("/api/links", (req, res) => {
     createdAt: new Date().toISOString(),
   };
   db.links.push(link);
-  writeDb(db);
+  await writeDb(db);
 
   res.status(201).json({
     ...link,
@@ -139,11 +132,11 @@ app.post("/api/links", (req, res) => {
     clicks: 0,
     shortUrl: `${publicBase(req)}/r/${code}`,
   });
-});
+}
 
-app.delete("/api/links/:code", (req, res) => {
+async function deleteLink(req, res) {
   const code = String(req.params.code || "").replace(/[^a-zA-Z0-9]/g, "");
-  const db = readDb();
+  const db = await readDb();
   const index = db.links.findIndex((l) => l.code === code);
   if (index === -1) {
     return res.status(404).json({ error: "Link não encontrado. Ele pode já ter sido apagado." });
@@ -151,12 +144,15 @@ app.delete("/api/links/:code", (req, res) => {
 
   const [removed] = db.links.splice(index, 1);
   db.clicks = db.clicks.filter((c) => c.code !== code);
-  writeDb(db);
+  await writeDb(db);
   res.json({ message: "deleted", code: removed.code });
-});
+}
 
-app.get("/api/stats", async (_req, res) => {
-  const fallback = { ...computeStats(readDb()), source: "node" };
+async function stats(_req, res) {
+  const fallback = { ...computeStats(await readDb()), source: "node" };
+  if (onVercel) {
+    return res.json(fallback);
+  }
   try {
     const response = await fetch(`${PYTHON_URL}/stats`, {
       signal: AbortSignal.timeout ? AbortSignal.timeout(1500) : undefined,
@@ -169,11 +165,27 @@ app.get("/api/stats", async (_req, res) => {
   } catch {
     res.json(fallback);
   }
-});
+}
 
-app.get("/r/:code", (req, res) => {
+async function health(_req, res) {
+  if (onVercel) {
+    return res.json({ ok: true, python: false });
+  }
+  let python = false;
+  try {
+    const response = await fetch(`${PYTHON_URL}/health`, {
+      signal: AbortSignal.timeout ? AbortSignal.timeout(800) : undefined,
+    });
+    python = response.ok;
+  } catch {
+    python = false;
+  }
+  res.json({ ok: true, python });
+}
+
+async function redirect(req, res) {
   const code = String(req.params.code || "").replace(/[^a-zA-Z0-9]/g, "");
-  const db = readDb();
+  const db = await readDb();
   const link = db.links.find((l) => l.code === code);
   if (!link) {
     return res.status(404).type("html").send(notFoundPage());
@@ -183,10 +195,25 @@ app.get("/r/:code", (req, res) => {
     code: link.code,
     at: new Date().toISOString(),
   });
-  writeDb(db);
+  await writeDb(db);
   res.redirect(302, link.url);
+}
+
+const api = express.Router();
+api.get("/health", wrap(health));
+api.get("/links", wrap(listLinks));
+api.post("/links", wrap(createLink));
+api.delete("/links/:code", wrap(deleteLink));
+api.get("/stats", wrap(stats));
+
+app.use("/api", api);
+app.use("/", api);
+app.get("/r/:code", wrap(redirect));
+app.get("/api/r/:code", wrap(redirect));
+
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ error: "Algo falhou no servidor. Tente de novo." });
 });
 
-app.listen(PORT, () => {
-  console.log(`Node.js API em http://localhost:${PORT}`);
-});
+module.exports = app;

@@ -113,7 +113,6 @@ export function Shorten({
 
   return (
     <section className="card card-center" aria-labelledby="encurtar-titulo">
-      <img className="illust" src="/illustrations/feat-encurtar.png" alt="" />
       <h1 id="encurtar-titulo" className="page-title">
         Novo link
       </h1>

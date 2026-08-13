@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "description": "API Node.js do encurtador de links",
-  "main": "server.js",
+  "main": "_lib/listen.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node _lib/listen.js",
+    "dev": "node --watch _lib/listen.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
