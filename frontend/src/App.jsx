@@ -90,10 +90,9 @@ export default function App() {
       setCreated(data);
       setUrl("");
       setNotice(
-        data.message ||
-          (data.reused
-            ? "Este endereço já tinha um link curto. Reaproveitamos o mesmo."
-            : "Link curto criado.")
+        data.reused
+          ? "Este endereço já tinha um link curto. Reaproveitamos o mesmo."
+          : "Link curto criado."
       );
       await load();
     } catch {

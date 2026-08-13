@@ -80,7 +80,7 @@ export function Help({ go }) {
       <img className="illust illust-wide" src="/illustrations/help-path.png" alt="" />
       <h1 className="page-title">Como usar</h1>
       <ol>
-        <li>Abra Encurtar e cole o endereço original. Copie da barra do navegador, não do resultado do Google.</li>
+        <li>Abra Encurtar e cole o endereço original.</li>
         <li>Clique em Encurtar e copie o atalho gerado.</li>
         <li>Envie o link curto para quem quiser.</li>
         <li>Cada abertura conta um clique em Meus links.</li>
@@ -144,7 +144,7 @@ export function Shorten({
       </form>
       <div aria-live="polite">
         {error && (
-          <p id="form-error" className="msg error explain" role="alert">
+          <p id="form-error" className="msg error" role="alert">
             {error}
           </p>
         )}
