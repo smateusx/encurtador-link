@@ -18,10 +18,7 @@ function wrap(handler) {
   };
 }
 
-function makeCode(url, size = 7) {
-  if (onVercel && url) {
-    return Buffer.from(url).toString("base64url");
-  }
+function makeCode(size = 7) {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const bytes = crypto.randomBytes(size);
   let code = "";
@@ -116,9 +113,9 @@ async function createLink(req, res) {
     });
   }
 
-  let code = makeCode(url);
+  let code = makeCode();
   while (db.links.some((l) => l.code === code)) {
-    code = makeCode(url);
+    code = makeCode();
   }
 
   const link = {
