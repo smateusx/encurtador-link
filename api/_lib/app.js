@@ -37,6 +37,13 @@ function normalizeUrl(value) {
   return raw;
 }
 
+function isGoogleHost(hostname) {
+  const host = String(hostname || "")
+    .replace(/^www\./, "")
+    .toLowerCase();
+  return host === "google.com" || host.endsWith(".google.com") || host.startsWith("google.");
+}
+
 function isValidUrl(value) {
   try {
     const u = new URL(value);
@@ -48,6 +55,44 @@ function isValidUrl(value) {
   } catch {
     return false;
   }
+}
+
+function unwrapSearchUrl(raw) {
+  try {
+    const u = new URL(normalizeUrl(String(raw || "").trim()));
+    if (!isGoogleHost(u.hostname)) return "";
+    for (const key of ["url", "q", "imgurl"]) {
+      const inner = u.searchParams.get(key);
+      if (!inner) continue;
+      const candidate = normalizeUrl(inner);
+      if (!isValidUrl(candidate)) continue;
+      if (isGoogleHost(new URL(candidate).hostname)) continue;
+      return candidate;
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function describeBadUrl(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "Cole um endereço para encurtar.";
+  if (/[›·…]/.test(text) || (/^\S+\s+\S+/.test(text) && !text.includes("://"))) {
+    return "Isso parece o texto do resultado do Google, não o link do site. Abra a página, copie o endereço da barra do navegador e cole aqui.";
+  }
+  try {
+    const u = new URL(normalizeUrl(text));
+    if (isGoogleHost(u.hostname)) {
+      return "Esse link é da busca do Google, não do site. O Google coloca um endereço enorme por cima. Abra o resultado, copie o link que aparece na barra do navegador e cole aqui.";
+    }
+  } catch {
+    // segue para as outras mensagens
+  }
+  if (text.length > MAX_URL_LENGTH) {
+    return "Esse endereço é longo demais. Se você copiou da busca do Google, entre no site e copie o link da barra do navegador — ele é bem menor.";
+  }
+  return "Não deu para reconhecer esse endereço. Abra o site, copie o link da barra do navegador e cole aqui. Evite copiar o resultado direto da busca do Google.";
 }
 
 function publicBase(req) {
@@ -89,18 +134,22 @@ async function listLinks(_req, res) {
 }
 
 async function createLink(req, res) {
-  const url = normalizeUrl(req.body?.url);
+  const raw = String(req.body?.url || "").trim();
+  const unwrapped = unwrapSearchUrl(raw);
+  const fromGoogle = Boolean(unwrapped);
+  const url = unwrapped || normalizeUrl(raw);
   if (!url) {
-    return res.status(400).json({ error: "Cole um endereço para encurtar." });
+    return res.status(400).json({ error: describeBadUrl(raw) });
   }
   if (url.length > MAX_URL_LENGTH) {
-    return res.status(400).json({ error: "Este endereço é longo demais." });
+    return res.status(400).json({ error: describeBadUrl(raw) });
   }
   if (!isValidUrl(url)) {
-    return res.status(400).json({
-      error: "URL inválida. Use um endereço completo, como exemplo.com ou https://exemplo.com",
-    });
+    return res.status(400).json({ error: describeBadUrl(raw) });
   }
+
+  const googleNotice =
+    "Você colou um link da busca do Google, não o endereço do site. Encurtamos o link real da página. Da próxima vez, abra o site e copie o endereço da barra do navegador.";
 
   const db = await readDb();
   const existing = db.links.find((l) => l.url === url);
@@ -108,6 +157,8 @@ async function createLink(req, res) {
     return res.status(200).json({
       ...existing,
       reused: true,
+      fromGoogle,
+      message: fromGoogle ? googleNotice : undefined,
       clicks: db.clicks.filter((c) => c.code === existing.code).length,
       shortUrl: `${publicBase(req)}/r/${existing.code}`,
     });
@@ -129,6 +180,8 @@ async function createLink(req, res) {
   res.status(201).json({
     ...link,
     reused: false,
+    fromGoogle,
+    message: fromGoogle ? googleNotice : undefined,
     clicks: 0,
     shortUrl: `${publicBase(req)}/r/${code}`,
   });
