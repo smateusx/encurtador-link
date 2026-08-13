@@ -3,8 +3,8 @@
   "outputDirectory": "frontend/dist",
   "framework": null,
   "rewrites": [
+    { "source": "/r/:code", "destination": "/api/r?go=:code" },
     { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/r/:code", "destination": "/api/r/:code" },
     { "source": "/((?!api/|r/).*)", "destination": "/index.html" }
   ]
 }

@@ -18,7 +18,10 @@ function wrap(handler) {
   };
 }
 
-function makeCode(size = 7) {
+function makeCode(url, size = 7) {
+  if (onVercel && url) {
+    return Buffer.from(url).toString("base64url");
+  }
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const bytes = crypto.randomBytes(size);
   let code = "";
@@ -113,9 +116,9 @@ async function createLink(req, res) {
     });
   }
 
-  let code = makeCode();
+  let code = makeCode(url);
   while (db.links.some((l) => l.code === code)) {
-    code = makeCode();
+    code = makeCode(url);
   }
 
   const link = {
@@ -135,7 +138,7 @@ async function createLink(req, res) {
 }
 
 async function deleteLink(req, res) {
-  const code = String(req.params.code || "").replace(/[^a-zA-Z0-9]/g, "");
+  const code = String(req.params.code || "").replace(/[^a-zA-Z0-9_-]/g, "");
   const db = await readDb();
   const index = db.links.findIndex((l) => l.code === code);
   if (index === -1) {
@@ -184,9 +187,20 @@ async function health(_req, res) {
 }
 
 async function redirect(req, res) {
-  const code = String(req.params.code || "").replace(/[^a-zA-Z0-9]/g, "");
+  const code = String(req.params.code || req.query.go || "").replace(
+    /[^a-zA-Z0-9_-]/g,
+    ""
+  );
   const db = await readDb();
-  const link = db.links.find((l) => l.code === code);
+  let link = db.links.find((l) => l.code === code);
+  if (!link) {
+    try {
+      const url = Buffer.from(code, "base64url").toString("utf8");
+      if (isValidUrl(url)) link = { code, url };
+    } catch {
+      link = null;
+    }
+  }
   if (!link) {
     return res.status(404).type("html").send(notFoundPage());
   }
@@ -206,10 +220,21 @@ api.post("/links", wrap(createLink));
 api.delete("/links/:code", wrap(deleteLink));
 api.get("/stats", wrap(stats));
 
+app.use(
+  wrap(async (req, res, next) => {
+    if (req.method !== "GET") return next();
+    const go = String(req.query.go || "").replace(/[^a-zA-Z0-9_-]/g, "");
+    if (!go) return next();
+    req.params = { ...req.params, code: go };
+    return redirect(req, res);
+  })
+);
+
 app.use("/api", api);
 app.use("/", api);
 app.get("/r/:code", wrap(redirect));
 app.get("/api/r/:code", wrap(redirect));
+app.get("/api/r", wrap(redirect));
 
 app.use((err, _req, res, _next) => {
   console.error(err);
